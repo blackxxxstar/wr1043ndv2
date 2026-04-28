@@ -8,10 +8,46 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl xz-utils ca-certificates
+          sudo apt-get upgrade -y
+          sudo apt-get update
+          sudo apt-get upgrade -y
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            xz-utils \
+            ca-certificates \
+            libssl-dev \
+            zlib1g-dev \
+            libncursesw5-dev \
+            libreadline-dev \
+            libsqlite3-dev \
+            libbz2-dev \
+            libgdbm-dev \
+            libffi-dev \
+            liblzma-dev \
+            tk-dev \
+            uuid-dev
+
+      - name: Build Python 2.7.18 for ImageBuilder
+        run: |
+          set -euxo pipefail
+
+          curl -LO https://www.python.org/ftp/python/2.7.18/Python-2.7.18.tgz
+          tar -xzf Python-2.7.18.tgz
+          cd Python-2.7.18
+
+          ./configure --prefix=/opt/python2
+          make -j"$(nproc)"
+          sudo make altinstall
+
+          sudo ln -sf /opt/python2/bin/python2.7 /usr/local/bin/python
+          sudo ln -sf /opt/python2/bin/python2.7 /usr/local/bin/python2
+
+          python --version
 
       - name: Download OpenWrt ImageBuilder
         run: |
@@ -22,10 +58,9 @@ jobs:
             https://archive.openwrt.org/releases/19.07.10/targets/ath79/generic/openwrt-imagebuilder-19.07.10-ath79-generic.Linux-x86_64.tar.xz
 
           tar -xf openwrt-imagebuilder.tar.xz
-
           mv openwrt-imagebuilder-19.07.10-ath79-generic.Linux-x86_64 ib
 
-      - name: Create default first boot config
+      - name: Prepare default WAN and Wi-Fi config
         run: |
           set -euxo pipefail
 
@@ -35,20 +70,17 @@ jobs:
           #!/bin/sh
           set -e
 
-          # WAN via DHCP from ISP
-          uci set network.wan.proto='dhcp'
-          uci commit network
+          uci -q set network.wan.proto='dhcp'
+          uci -q commit network
 
-          # Enable Wi-Fi AP
-          uci set wireless.@wifi-device[0].disabled='0'
-          uci set wireless.@wifi-iface[0].device='radio0'
-          uci set wireless.@wifi-iface[0].mode='ap'
-          uci set wireless.@wifi-iface[0].network='lan'
-          uci set wireless.@wifi-iface[0].ssid='TP-Link TL-WR1043ND'
-          uci set wireless.@wifi-iface[0].encryption='none'
-          uci -q delete wireless.@wifi-iface[0].key
-
-          uci commit wireless
+          uci -q set wireless.@wifi-device[0].disabled='0'
+          uci -q set wireless.@wifi-iface[0].device='radio0'
+          uci -q set wireless.@wifi-iface[0].mode='ap'
+          uci -q set wireless.@wifi-iface[0].network='lan'
+          uci -q set wireless.@wifi-iface[0].ssid='TP-Link TL-WR1043ND'
+          uci -q set wireless.@wifi-iface[0].encryption='none'
+          uci -q delete wireless.@wifi-iface[0].key 2>/dev/null || true
+          uci -q commit wireless
 
           exit 0
           EOF
@@ -57,9 +89,9 @@ jobs:
 
       - name: Build firmware
         run: |
+          set -euxo pipefail
           cd ib
-
-          make image \
+          PATH="/opt/python2/bin:$PATH" make image \
             PROFILE="tplink_tl-wr1043nd-v2" \
             FILES="../files" \
             PACKAGES="luci wpad-basic dnsmasq firewall \
